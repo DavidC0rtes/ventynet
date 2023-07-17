@@ -1,0 +1,879 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE nta PUBLIC '-//Uppaal Team//DTD Flat System 1.6//EN' 'http://www.it.uu.se/research/group/darts/uppaal/flat-1_6.dtd'>
+<nta>
+	<declaration>// Place global declarations here.
+        int psi;
+        broadcast chan reset;
+        broadcast chan resetExp;
+        broadcast chan inspirar, espirar;
+        broadcast chan endSetup;
+        broadcast chan expOn, expOff;
+        int Q; // Int representation of q
+        /**sefsefse
+        Tendremos dos inyectores, uno de aire y uno de oxigeno
+        Cada inyector tiene un dato tipo bool que indica si está encendido o no: isOn
+        Además un entero que indica el caudal que circulará
+
+        **/
+        typedef struct {
+        bool isOn;
+        int caudal;
+        } Inyector;
+    
+// Factor de escalad 10E4
+const double PI = 3.141592;
+const double d1 = 0.0254; // m
+const double l1 = 3.0; // longitud mangera 1 m
+const double l2 = 0.3; // longitud mangera 2 m
+const double dt = 0.01; // s
+const double w = 1.81E-5; // Ns / m^2
+
+double q;
+int v1 = 4250; // volumen del tanque 1 m^3
+int v2 = 1000;    // volumen del tanque 2 m^3
+int p1 = 10000; // Presion inicial del tanque 1 Psi
+int p2 = 100; // Presion inicial del tanque 2 Psi
+int correct;
+double delta, delta2;
+
+double p2x = 6894.76;
+double p1x = 68947.6;
+
+int getQ(int p_i, int p_j, double l) {
+    double foo = (p_i*6894.76)/100;
+    double bar = (p_j*6894.76)/100;
+    return fint((PI * (foo-bar) * pow(d1,4)) / (l*128*w));
+}
+
+int getDelta() {
+//    p2x = p2x + (dt*q)/(1E-3);
+//    delta = (100*dt*Q)/(1E-3);
+//    delta2 = (dt*q)/(1E-3);
+    return fint((100*dt*Q)/(6894.76*1E-3));
+}</declaration>
+	<template>
+		<name x="5" y="5">Setup</name>
+		<parameter>int[0,500] &amp;airflow, int[0,100] &amp;FiO2, int[0,100] &amp;dutyAir,int[0,100] &amp;dutyO2</parameter>
+		<declaration>// Place local declarations here.
+            /**
+            Configuración de ciclos de trabajo de los inyectores
+            flowrate: Es el caudal requerido ([L^3 T^-1]; dado en litros por minuto )
+            FiO2: Fracción de oxígeno inspirado, dado en porcentaje de oxigeno en el aire
+            **/
+            int[0,500] flowrate;
+            int[0,500] o2WithoutAir;
+
+
+            /**
+            De acuerdo a la siguiente tabla
+
+            |  x  |  y  |
+            ------------
+            | 120 | 30  |
+            | 220 | 40  |
+            | 280 | 50  |
+            | 350 | 60  |
+            | 380 | 70  |
+            | 410 | 80  |
+            | 450 | 90  |
+            | 500 | 100 |
+
+            Se construye una función para extrapolar los valores, dicha función es de grado 2 debido al desbordamiento de int
+            teniendo f(x) = 0,0001x^2+0,1441x+3,6656
+            **/
+
+            int getDuty(int x){
+            return  (x&lt;=120)?
+            30:
+            (x&lt;=220)?
+            40:
+            (x&lt;=280)?
+            50:
+            (x&lt;=350)?
+            60:
+            (x&lt;=380)?
+            70:
+            (x&lt;=410)?
+            80:
+            (x&lt;=450)?
+            90:
+            100; //more than 450, expected until 500
+
+            }
+
+
+
+
+        </declaration>
+		<location id="id0" x="-68" y="17">
+			<committed/>
+		</location>
+		<location id="id1" x="153" y="17">
+			<committed/>
+		</location>
+		<location id="id2" x="365" y="17">
+			<label kind="exponentialrate" x="391" y="25">1</label>
+			<committed/>
+		</location>
+		<location id="id3" x="552" y="17">
+			<committed/>
+		</location>
+		<location id="id4" x="552" y="144">
+		</location>
+		<init ref="id0"/>
+		<transition id="id5">
+			<source ref="id4"/>
+			<target ref="id0"/>
+			<label kind="synchronisation" x="238" y="153">reset?</label>
+			<nail x="-68" y="144"/>
+		</transition>
+		<transition id="id6">
+			<source ref="id3"/>
+			<target ref="id4"/>
+			<label kind="select" x="561" y="51">x : int[50,100]</label>
+			<label kind="synchronisation" x="561" y="68">endSetup!</label>
+			<label kind="assignment" x="561" y="85">psi=x</label>
+		</transition>
+		<transition id="id7">
+			<source ref="id2"/>
+			<target ref="id3"/>
+			<label kind="assignment" x="391" y="-59">dutyAir=getDuty(o2WithoutAir),
+dutyO2=getDuty(flowrate)</label>
+		</transition>
+		<transition id="id8">
+			<source ref="id1"/>
+			<target ref="id2"/>
+			<label kind="assignment" x="144" y="42">flowrate=fint(round(Q*FiO2/100)),
+o2WithoutAir=Q-flowrate</label>
+		</transition>
+		<transition id="id9">
+			<source ref="id0"/>
+			<target ref="id1"/>
+			<label kind="select" x="-51" y="34">fiO2Actual: int[1,10]</label>
+			<label kind="assignment" x="-229" y="25">Q=airflow*100,
+FiO2=fiO2Actual*10</label>
+		</transition>
+	</template>
+	<template>
+		<name>Control</name>
+		<parameter>int pInsp, int pExp, int tInsp, int tExp, broadcast chan &amp;O2mixed, broadcast chan  &amp;O2on, broadcast chan &amp;O2Off, broadcast chan &amp;airMixed, broadcast chan  &amp;airOn, broadcast chan &amp;airOff</parameter>
+		<declaration>clock a,pause;</declaration>
+		<location id="id10" x="-204" y="-756">
+			<name x="-204" y="-790">Start</name>
+			<label kind="invariant" x="-187" y="-765">a&lt;=1</label>
+		</location>
+		<location id="id11" x="-204" y="-408">
+			<urgent/>
+		</location>
+		<location id="id12" x="8" y="-408">
+			<name x="33" y="-425">openInsp</name>
+			<label kind="exponentialrate" x="25" y="-417">1</label>
+		</location>
+		<location id="id13" x="8" y="-110">
+			<name x="25" y="-119">Insp</name>
+			<urgent/>
+		</location>
+		<location id="id14" x="195" y="-408">
+			<name x="212" y="-425">InsPause</name>
+			<label kind="invariant" x="212" y="-408">pause&lt;=pInsp</label>
+		</location>
+		<location id="id15" x="-408" y="-408">
+			<name x="-485" y="-425">openExp</name>
+			<label kind="exponentialrate" x="-391" y="-408">1</label>
+		</location>
+		<location id="id16" x="-408" y="-110">
+			<name x="-451" y="-118">Exp</name>
+			<urgent/>
+		</location>
+		<location id="id17" x="-578" y="-399">
+			<name x="-654" y="-408">ExpPause</name>
+			<label kind="invariant" x="-671" y="-391">pause&lt;=pExp</label>
+		</location>
+		<location id="id18" x="-246" y="-680">
+			<urgent/>
+		</location>
+		<location id="id19" x="-153" y="-680">
+			<urgent/>
+		</location>
+		<location id="id20" x="-204" y="-603">
+		</location>
+		<location id="id21" x="-263" y="-527">
+		</location>
+		<location id="id22" x="-144" y="-527">
+		</location>
+		<location id="id23" x="-289" y="-807">
+			<name x="-299" y="-841">Setup</name>
+		</location>
+		<location id="id24" x="-408" y="-272">
+			<urgent/>
+		</location>
+		<init ref="id23"/>
+		<transition id="id25">
+			<source ref="id24"/>
+			<target ref="id11"/>
+			<label kind="guard" x="-340" y="-314">not correct</label>
+			<label kind="synchronisation" x="-331" y="-331">resetExp!</label>
+		</transition>
+		<transition id="id26">
+			<source ref="id24"/>
+			<target ref="id16"/>
+			<label kind="guard" x="-399" y="-221">correct</label>
+			<label kind="assignment" x="-399" y="-195">Q=getQ(0,p2,l2),
+p2=p2+getDelta()</label>
+		</transition>
+		<transition id="id27">
+			<source ref="id15"/>
+			<target ref="id24"/>
+			<label kind="select" x="-399" y="-365">k:int[0,9]</label>
+			<label kind="assignment" x="-399" y="-348">correct=k</label>
+		</transition>
+		<transition id="id28">
+			<source ref="id10"/>
+			<target ref="id23"/>
+			<label kind="guard" x="-365" y="-790">psi&lt;80</label>
+			<label kind="synchronisation" x="-357" y="-773">reset!</label>
+			<nail x="-289" y="-756"/>
+		</transition>
+		<transition id="id29">
+			<source ref="id23"/>
+			<target ref="id10"/>
+			<label kind="synchronisation" x="-263" y="-816">endSetup?</label>
+		</transition>
+		<transition id="id30">
+			<source ref="id22"/>
+			<target ref="id11"/>
+			<label kind="synchronisation" x="-153" y="-501">O2mixed?</label>
+			<label kind="assignment" x="-170" y="-467">a=0</label>
+		</transition>
+		<transition id="id31">
+			<source ref="id21"/>
+			<target ref="id11"/>
+			<label kind="synchronisation" x="-323" y="-493">airMixed?</label>
+			<label kind="assignment" x="-263" y="-467">a=0</label>
+		</transition>
+		<transition id="id32">
+			<source ref="id20"/>
+			<target ref="id22"/>
+			<label kind="synchronisation" x="-170" y="-586">airMixed?</label>
+		</transition>
+		<transition id="id33">
+			<source ref="id20"/>
+			<target ref="id21"/>
+			<label kind="synchronisation" x="-297" y="-586">O2mixed?</label>
+		</transition>
+		<transition id="id34">
+			<source ref="id19"/>
+			<target ref="id20"/>
+			<label kind="synchronisation" x="-161" y="-654">O2on!</label>
+		</transition>
+		<transition id="id35">
+			<source ref="id18"/>
+			<target ref="id20"/>
+			<label kind="synchronisation" x="-280" y="-654">airOn!</label>
+		</transition>
+		<transition id="id36">
+			<source ref="id10"/>
+			<target ref="id19"/>
+			<label kind="guard" x="-170" y="-748">a==1 and psi&gt;=80</label>
+			<label kind="synchronisation" x="-170" y="-731">airOn!</label>
+		</transition>
+		<transition id="id37">
+			<source ref="id10"/>
+			<target ref="id18"/>
+			<label kind="guard" x="-365" y="-748">a==1 and psi&gt;=80</label>
+			<label kind="synchronisation" x="-272" y="-731">O2on!</label>
+		</transition>
+		<transition id="id38">
+			<source ref="id13"/>
+			<target ref="id11"/>
+			<label kind="guard" x="-110" y="-297">a&lt;100</label>
+		</transition>
+		<transition id="id39">
+			<source ref="id16"/>
+			<target ref="id11"/>
+			<label kind="guard" x="-348" y="-136">a&lt;350</label>
+			<nail x="-204" y="-110"/>
+		</transition>
+		<transition id="id40">
+			<source ref="id17"/>
+			<target ref="id11"/>
+			<label kind="guard" x="-663" y="-476">a&gt;=350 &amp;&amp; pause==pExp</label>
+			<label kind="assignment" x="-476" y="-501">a=0</label>
+			<nail x="-425" y="-493"/>
+		</transition>
+		<transition id="id41">
+			<source ref="id16"/>
+			<target ref="id17"/>
+			<label kind="guard" x="-569" y="-280">a&gt;=350</label>
+			<label kind="synchronisation" x="-569" y="-255">expOff!</label>
+			<label kind="assignment" x="-544" y="-238">pause=0,
+Q=0</label>
+		</transition>
+		<transition id="id42">
+			<source ref="id11"/>
+			<target ref="id15"/>
+			<label kind="guard" x="-306" y="-425">a&gt;100</label>
+			<label kind="synchronisation" x="-374" y="-425">expOn!</label>
+		</transition>
+		<transition id="id43">
+			<source ref="id14"/>
+			<target ref="id11"/>
+			<label kind="guard" x="42" y="-493">a&lt;350 &amp;&amp; pause==pInsp</label>
+			<nail x="8" y="-484"/>
+		</transition>
+		<transition id="id44">
+			<source ref="id13"/>
+			<target ref="id14"/>
+			<label kind="guard" x="110" y="-272">a&gt;=100</label>
+			<label kind="assignment" x="110" y="-246">pause=0,
+Q=0</label>
+		</transition>
+		<transition id="id45">
+			<source ref="id12"/>
+			<target ref="id13"/>
+			<label kind="assignment" x="17" y="-348">Q=getQ(p1,p2,l1),
+p2=p2+getDelta()</label>
+		</transition>
+		<transition id="id46">
+			<source ref="id11"/>
+			<target ref="id12"/>
+			<label kind="guard" x="-102" y="-433">a&lt;=100</label>
+		</transition>
+	</template>
+	<template>
+		<name>MixChamber</name>
+		<parameter>broadcast chan &amp;mixed, broadcast chan  &amp;turnOn, broadcast chan &amp;turnOff, int[0,100] &amp;duty, broadcast chan &amp;finConfiguracion, int &amp;mix</parameter>
+		<declaration>clock time;
+
+            /**
+            De acuerdo a la siguiente tabla
+
+            | apertura | caudal |
+            ---------------------
+            |    30    |   120  |
+            |    40    |   220  |
+            |    50    |   280  |
+            |    60    |   350  |
+            |    70    |   380  |
+            |    80    |   410  |
+            |    90    |   450  |
+            |    100   |   500  |
+
+            Adicionales para completar las posibilidades con el duty de 30%
+            | apertura | caudal |
+            ---------------------
+            |    00    |   120  |
+            |    10    |   120  |
+            |    20    |   120  |
+
+            **/
+            int params[11] = {120,120,120,120,220,280,350,380,410,450,500};
+
+            int getFlowWithPassage(int n){
+                return params[n/10];
+            }</declaration>
+		<location id="id47" x="161" y="8">
+			<name x="136" y="25">off</name>
+		</location>
+		<location id="id48" x="382" y="8">
+			<name x="374" y="25">on</name>
+			<label kind="invariant" x="365" y="42">time&lt;=300</label>
+		</location>
+		<init ref="id47"/>
+		<transition id="id49">
+			<source ref="id48"/>
+			<target ref="id47"/>
+			<label kind="guard" x="187" y="110">time==300</label>
+			<label kind="synchronisation" x="187" y="127">mixed!</label>
+			<label kind="assignment" x="187" y="144">mix=getFlowWithPassage(duty)</label>
+			<nail x="263" y="110"/>
+		</transition>
+		<transition id="id50">
+			<source ref="id48"/>
+			<target ref="id47"/>
+			<label kind="synchronisation" x="246" y="-102">turnOff?</label>
+			<label kind="assignment" x="246" y="-85">time=0</label>
+			<nail x="272" y="-68"/>
+		</transition>
+		<transition id="id51">
+			<source ref="id47"/>
+			<target ref="id48"/>
+			<label kind="synchronisation" x="246" y="17">turnOn?</label>
+			<label kind="assignment" x="246" y="34">time=0</label>
+		</transition>
+	</template>
+	<template>
+		<name>ExpValve</name>
+		<parameter>broadcast chan &amp;done, int &amp;mix</parameter>
+		<declaration>clock time;</declaration>
+		<location id="id52" x="0" y="0">
+			<name x="-42" y="-8">off</name>
+		</location>
+		<location id="id53" x="221" y="0">
+			<name x="238" y="-8">on</name>
+			<label kind="invariant" x="238" y="8">time&lt;=200</label>
+		</location>
+		<init ref="id52"/>
+		<transition id="id54">
+			<source ref="id53"/>
+			<target ref="id52"/>
+			<label kind="synchronisation" x="17" y="93">resetExp?</label>
+			<label kind="assignment" x="18" y="76">time=0</label>
+			<nail x="221" y="76"/>
+			<nail x="0" y="76"/>
+		</transition>
+		<transition id="id55">
+			<source ref="id53"/>
+			<target ref="id53"/>
+			<label kind="guard" x="195" y="-102">time==200</label>
+			<label kind="synchronisation" x="195" y="-85">done!</label>
+			<label kind="assignment" x="195" y="-68">mix=0</label>
+			<nail x="195" y="-42"/>
+			<nail x="246" y="-42"/>
+		</transition>
+		<transition id="id56">
+			<source ref="id53"/>
+			<target ref="id52"/>
+			<label kind="guard" x="76" y="-136">time==200</label>
+			<label kind="synchronisation" x="76" y="-119">expOff?</label>
+			<label kind="assignment" x="76" y="-102">time=0</label>
+			<nail x="110" y="-76"/>
+		</transition>
+		<transition id="id57">
+			<source ref="id52"/>
+			<target ref="id53"/>
+			<label kind="synchronisation" x="68" y="0">expOn?</label>
+			<label kind="assignment" x="68" y="17">time=0</label>
+		</transition>
+	</template>
+	<system>// Place template instantiations here.
+
+        /**
+        Configuración de ciclos de trabajo de los inyectores
+        flowrate: Es el caudal requerido ([L^3 T^-1]; dado en litros por minuto ) en un Dominio [0,500]
+        FiO2: Fracción de oxígeno inspirado, dado en porcentaje de oxigeno en el aire en un Dominio [0,100]
+
+        **/
+        int[0,500] flowrate;
+        int[0,100] FiO2;
+
+        /**
+        Porcentaje de tiempo por segundo que va a estar activo el inyector para generar el caudal requerido,
+        tenemos un inyector de aire y uno de oxigeno
+        airDuty: Porcentaje de apertura durante un segundo para suministrar aire
+        o2Duty: Porcentaje de apertura durante un segundo para suministrar oxigeno
+        **/
+        int[0,100] airDuty;
+        int[0,100] o2Duty;
+
+        /**
+        Notificación de parte del configurador de inyectores al controlador de que están listos a través del canal finConfiguracion
+        **/
+        broadcast chan finConfiguracion;
+
+
+        //flowrate, FiO2, inputs
+        //airDuty, o2Duty, outputs
+        //finConfiguracion, canal para informar a ventilator que ya están los outputs asignados
+        configuracion = Setup(flowrate, FiO2, airDuty, o2Duty);
+
+
+
+        /**
+        Regular mezcla
+
+        **/
+
+        /**
+        Inyector inyectorOxigeno={false, 0};
+        Inyector inyectorAire={false, 0};
+        **/
+
+        broadcast chan encenderOxigeno;
+        broadcast chan encenderAire;
+        broadcast chan apagarOxigeno;
+        broadcast chan apagarAire;
+
+        int mezcla=0;
+
+        broadcast chan oxigenoMezclado;
+        broadcast chan aireMezclado;
+
+        o2Valve = MixChamber(oxigenoMezclado, encenderOxigeno, apagarOxigeno, o2Duty, finConfiguracion, mezcla);
+        airValve =MixChamber(aireMezclado, encenderAire, apagarAire, airDuty, finConfiguracion, mezcla);
+
+
+
+        /**
+        Valvula para expirar
+
+        **/
+
+        broadcast chan mezclaEspirada;
+        broadcast chan encenderValvula;
+        broadcast chan apagarValvula;
+
+        expValve = ExpValve(mezclaEspirada, mezcla);
+
+        //ventilator = General(finConfiguracion, oxigenoMezclado, encenderOxigeno, apagarOxigeno, aireMezclado, encenderAire, apagarAire, mezclaEspirada, encenderValvula, apagarValvula);
+        Ventilator = Control(20,30,0,0, oxigenoMezclado, encenderOxigeno, apagarOxigeno, aireMezclado, encenderAire, apagarAire);
+        // List one or more processes to be composed into a system.
+        system  configuracion, o2Valve, airValve, expValve, Ventilator;
+        //system TestProcess;</system>
+	<queries>
+		<query>
+			<formula>A[] not deadlock</formula>
+			<comment>Siempre habrán transiciones desde alguna locacion para realizar</comment>
+		</query>
+		<query>
+			<formula>Q==400 and FiO2 == 30 --&gt; airDuty == 50 and o2Duty == 30</formula>
+			<comment/>
+		</query>
+		<query>
+			<formula>Pr[&lt;=650](&lt;&gt; Ventilator.Insp or psi&lt;80)</formula>
+			<comment>Para todos los paths, la inspiración implica que el psi sea mayor o igual a 80 psi, negation of A[] (not ventilator.Inspiration or psi&gt;=80)</comment>
+		</query>
+		<query>
+			<formula>A[] (not ventilator.CorrectExp or not (ventilator.valveFail))</formula>
+			<comment>Para todos los paths, el espirado correcto implica que no hay falla en valvula</comment>
+		</query>
+		<query>
+			<formula>E&lt;&gt; ventilator.Inspiration</formula>
+			<comment>Es posible alcanzar el estado de inspiracion</comment>
+		</query>
+		<query>
+			<formula>E&lt;&gt; ventilator.CorrectExp</formula>
+			<comment>Es posible alcanzar el estado de espiracion correcto</comment>
+		</query>
+		<query>
+			<formula>E&lt;&gt; ventilator.InspPause</formula>
+			<comment/>
+		</query>
+		<query>
+			<formula>A[] (not (o2Valve.on or airValve.on) or expValve.off)</formula>
+			<comment>Para todos los paths. Algún inyector encendido implica que la valvula de espiración está apagado</comment>
+		</query>
+		<query>
+			<formula>E&lt;&gt; o2Valve.on or airValve.on</formula>
+			<comment>Es posible alcanzar estados donde los inyectores estén encendidos. La propiedad verifica también que la propiedad anterior es una implicación donde el antecedente es posible</comment>
+		</query>
+		<query>
+			<formula>A[] (not expValve.on or (o2Valve.off and airValve.off))</formula>
+			<comment>Para todos los paths. La valvula de espiración encendida implica que ambos inyectores (oxigeno y aire) están apagados</comment>
+		</query>
+		<query>
+			<formula>E&lt;&gt; expValve.on</formula>
+			<comment>Es posible alcanzar estados donde la valvula de espiración esté encendida. La propiedad verifica también que la propiedad anterior es una implicación donde el antecedente es posible</comment>
+		</query>
+		<query>
+			<formula>A[] (not expValve.on or not(expValve.time&gt;200))</formula>
+			<comment>La valvula de espiración nunca está encendida por más de 200 centisegundos</comment>
+		</query>
+		<query>
+			<formula>A[] (not (o2Valve.on and airValve.on) or not(o2Valve.time&gt;300))</formula>
+			<comment>Los inyectores de aire y oxigeno para inspiración nunca están encendidos por más de 300 centisegundos</comment>
+		</query>
+		<query>
+			<formula>simulate[&lt;=650]{Q}</formula>
+			<comment/>
+			<result outcome="success" type="quality" timestamp="2023-07-17 20:01:01 +0200">
+				<plot title="Simulations (1)" xaxis="time" yaxis="value">
+					<series title="Q" type="l" color="0xff0000" encoding="csv">0.0,0.0
+301.5478495291916,0.0
+301.5478495291916,128.0
+302.11296883012807,128.0
+302.11296883012807,127.0
+304.7311594623652,127.0
+304.7311594623652,126.0
+310.90413328247274,126.0
+310.90413328247274,125.0
+312.87997976855576,125.0
+312.87997976855576,124.0
+316.2275837415112,124.0
+316.2275837415112,123.0
+317.60217571414665,123.0
+317.60217571414665,122.0
+324.3807886163355,122.0
+324.3807886163355,121.0
+336.6886078793623,121.0
+336.6886078793623,120.0
+338.7892172847884,120.0
+338.7892172847884,119.0
+345.4496141696659,119.0
+345.4496141696659,118.0
+348.6432319243655,118.0
+348.6432319243655,117.0
+349.6078792766576,117.0
+349.6078792766576,116.0
+355.31583926564144,116.0
+355.31583926564144,115.0
+360.77603060665524,115.0
+360.77603060665524,114.0
+362.87890096900446,114.0
+362.87890096900446,113.0
+364.21363353326257,113.0
+364.21363353326257,112.0
+367.2798107112694,112.0
+367.2798107112694,111.0
+374.47486459522065,111.0
+374.47486459522065,110.0
+378.7459700196465,110.0
+378.7459700196465,109.0
+384.85960866586174,109.0
+384.85960866586174,108.0
+389.91704012575184,108.0
+389.91704012575184,107.0
+397.0061936372365,107.0
+397.0061936372365,106.0
+401.0607258581989,106.0
+401.0607258581989,0.0
+423.5292375353197,0.0
+423.5292375353197,-239.0
+424.1370298788819,-239.0
+424.1370298788819,-235.0
+424.7026713807495,-235.0
+424.7026713807495,-230.0
+425.140759495121,-230.0
+425.140759495121,-226.0
+425.5451330447193,-226.0
+425.5451330447193,-222.0
+426.5059621230982,-222.0
+426.5059621230982,-218.0
+429.8701754264265,-218.0
+429.8701754264265,-214.0
+430.06114651331114,-214.0
+430.11955345469033,-210.0
+430.11955345469033,-206.0
+432.01442215442466,-206.0
+432.01442215442466,-202.0
+432.4003388989841,-202.0
+432.4003388989841,-198.0
+433.84652299776144,-198.0
+433.84652299776144,-195.0
+434.78836923931823,-195.0
+434.78836923931823,-191.0
+436.90942470045627,-191.0
+437.0595868804234,-188.0
+437.0595868804234,-184.0
+437.60449165775253,-184.0
+437.60449165775253,-181.0
+437.8036981910889,-181.0
+437.8036981910889,-177.0
+438.5614629262393,-177.0
+438.5904891840906,-174.0
+438.5904891840906,-171.0
+439.5304525949922,-171.0
+439.5304525949922,-168.0
+440.7703776948113,-168.0
+440.7703776948113,-165.0
+441.48989542227764,-165.0
+441.6281248212589,-162.0
+441.6281248212589,-159.0
+442.3566053070994,-159.0
+442.3566053070994,-156.0
+443.2845101684449,-156.0
+443.2845101684449,-153.0
+443.6859610336006,-153.0
+443.6859610336006,-150.0
+444.03994255479495,-150.0
+444.03994255479495,-147.0
+445.3995406700202,-147.0
+445.3995406700202,-145.0
+446.08726539718026,-145.0
+446.08726539718026,-142.0
+448.3802086223271,-142.0
+448.3802086223271,-139.0
+450.1219850911677,-139.0
+450.1219850911677,-137.0
+450.5759982251175,-137.0
+450.5759982251175,-134.0
+450.9940269884333,-134.0
+450.9940269884333,-132.0
+453.67572438952425,-132.0
+453.67572438952425,-129.0
+455.0297587898265,-129.0
+455.0297587898265,-127.0
+455.27113844690956,-127.0
+455.27113844690956,-125.0
+456.23980759174293,-125.0
+456.23980759174293,-122.0
+457.3145379765084,-122.0
+457.3145379765084,-120.0
+457.531151902281,-120.0
+457.63060754242827,-118.0
+457.63060754242827,-116.0
+458.8610886153679,-116.0
+458.8610886153679,-114.0
+459.2280287025816,-114.0
+459.2280287025816,-111.0
+460.1310536487119,-111.0
+460.1310536487119,-109.0
+460.312000715456,-109.0
+460.312000715456,-107.0
+461.3616164355488,-107.0
+461.3616164355488,-105.0
+463.29807014417764,-105.0
+463.29807014417764,-104.0
+463.57040581715614,-104.0
+463.57040581715614,-102.0
+463.92724991001955,-102.0
+463.92724991001955,-100.0
+464.60293241654756,-100.0
+464.60293241654756,-98.0
+466.8574881830014,-98.0
+466.8574881830014,-96.0
+467.52488417775487,-96.0
+467.56629471307014,-94.0
+467.56629471307014,-93.0
+468.13452389995126,-93.0
+468.13452389995126,-91.0
+469.59405098212056,-91.0
+469.59405098212056,-89.0
+471.2094052427008,-89.0
+471.2094052427008,-88.0
+471.89687340412723,-88.0
+471.89687340412723,-86.0
+472.8514889092683,-86.0
+472.8514889092683,-85.0
+474.71632385496633,-85.0
+474.71632385496633,-83.0
+476.1396129481939,-83.0
+476.1396129481939,-82.0
+476.44022805611985,-82.0
+476.5722310185789,-80.0
+476.5722310185789,-79.0
+477.58801352896194,-79.0
+477.58801352896194,-77.0
+480.3267406368384,-77.0
+480.3267406368384,-76.0
+480.69562279113734,-76.0
+480.69562279113734,-74.0
+481.8582648012518,-74.0
+481.8582648012518,-73.0
+483.01144081578326,-73.0
+483.01144081578326,-72.0
+483.73166726651795,-72.0
+483.73166726651795,-71.0
+484.48885399632996,-71.0
+484.48885399632996,-69.0
+486.0290389965689,-69.0
+486.0290389965689,-68.0
+486.6218783252521,-68.0
+486.6218783252521,-67.0
+487.37674931588197,-67.0
+487.5278343688987,-66.0
+487.5278343688987,-64.0
+488.51081045231496,-64.0
+488.5512448606141,-63.0
+488.5512448606141,-62.0
+491.3770244567443,-62.0
+491.3770244567443,-61.0
+493.17722530670744,-61.0
+493.17722530670744,-60.0
+493.35775452692684,-60.0
+493.35775452692684,-59.0
+495.48749560774206,-59.0
+495.48749560774206,-58.0
+497.5857962330413,-58.0
+497.5857962330413,-57.0
+498.2451389603979,-57.0
+498.2451389603979,-56.0
+498.62445043822737,-56.0
+498.62445043822737,-55.0
+500.74150094211075,-55.0
+500.74150094211075,-54.0
+503.8249203032144,-54.0
+503.8249203032144,-53.0
+504.5619527411954,-53.0
+504.5619527411954,-52.0
+507.01968665815417,-52.0
+507.17687626581426,-51.0
+507.17687626581426,-50.0
+508.387020725618,-50.0
+508.387020725618,-49.0
+510.2814747359514,-49.0
+510.2814747359514,-48.0
+512.6131974317644,-48.0
+512.6131974317644,-47.0
+514.3670414641989,-47.0
+514.3670414641989,-46.0
+514.872478869736,-46.0
+514.872478869736,-45.0
+516.9592104506128,-45.0
+516.9827486976326,-44.0
+516.9827486976326,-43.0
+517.4997284668087,-43.0
+517.4997284668087,-42.0
+517.8070134306759,-42.0
+517.8070134306759,-41.0
+518.3868915294855,-41.0
+518.5127823777891,-40.0
+518.5127823777891,-39.0
+522.5202486740147,-39.0
+522.5202486740147,-38.0
+524.7126173970863,-38.0
+524.7126173970863,-37.0
+525.4194905082198,-37.0
+525.4194905082198,-36.0
+527.7067843307062,-36.0
+527.7067843307062,-35.0
+528.0747846114724,-35.0
+528.0747846114724,-34.0
+528.8136913739187,-34.0
+528.8136913739187,-33.0
+536.0146613138432,-33.0
+536.0146613138432,-32.0
+539.6568279389672,-32.0
+539.6568279389672,-31.0
+542.3971584892832,-31.0
+542.3971584892832,-30.0
+544.626615983373,-30.0
+544.626615983373,-29.0
+547.2427210172114,-29.0
+547.2427210172114,-28.0
+548.1227510257199,-28.0
+548.1227510257199,-27.0
+551.1559677373544,-27.0
+551.1559677373544,-26.0
+554.3906522689748,-26.0
+554.3906522689748,-25.0
+558.2231117944062,-25.0
+558.2231117944062,-24.0
+563.3134392150517,-24.0
+563.3134392150517,-23.0
+566.5510826742517,-23.0
+566.5510826742517,-22.0
+570.6495384686976,-22.0
+570.6495384686976,-21.0
+571.9502932301612,-21.0
+571.9502932301612,-20.0
+575.2777960645269,-20.0
+575.2777960645269,-19.0
+579.071798190835,-19.0
+579.071798190835,-18.0
+584.7571520497352,-18.0
+584.7571520497352,-17.0
+592.4471394724877,-17.0
+592.4471394724877,-16.0
+608.4090043518643,-16.0
+608.4090043518643,-15.0
+610.3192353946138,-15.0
+610.3192353946138,-14.0
+612.4411613408744,-14.0
+612.4411613408744,-13.0
+621.3734128538142,-13.0
+621.3734128538142,-12.0
+627.119694469049,-12.0
+627.119694469049,-11.0
+638.6856679542728,-11.0
+638.6856679542728,-10.0
+645.8467695213698,-10.0
+645.8467695213698,-9.0
+650.0,-9.0
+					</series>
+					<comment/>
+				</plot>
+			</result>
+		</query>
+	</queries>
+</nta>
